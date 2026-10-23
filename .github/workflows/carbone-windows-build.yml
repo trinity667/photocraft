@@ -1,0 +1,51 @@
+# Builds PhotoCraft (app + CLI) for Windows x64 in GitHub's cloud, from an unmodified fork of
+# storytold/photocraft, and keeps the two .exe files as a downloadable artifact.
+# Copied into the fork as .github/workflows/carbone-windows-build.yml on the `carbone-build` branch:
+# the project's own workflows only run on main/release, so nothing else starts.
+name: Carbone - compilation Windows
+
+on:
+  push:
+    branches: [carbone-build]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: PhotoCraft Windows x64 (release)
+    runs-on: windows-latest
+    timeout-minutes: 150
+    env:
+      CARGO_TERM_COLOR: always
+      # no debug info in the release build: faster link, smaller artifact
+      CARGO_PROFILE_RELEASE_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # compiled dependencies are cached between runs: the next build is much faster
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Compilation
+        shell: pwsh
+        run: |
+          $t = Get-Date
+          cargo build --release --locked -p photocraft -p photocraft-cli
+          "Durée de compilation : $([int]((Get-Date) - $t).TotalMinutes) min" | Tee-Object -FilePath build-report.txt
+          Get-ChildItem target/release/*.exe | ForEach-Object { "{0} : {1:N1} Mo" -f $_.Name, ($_.Length / 1MB) } | Tee-Object -FilePath build-report.txt -Append
+          "Espace utilisé par la compilation : {0:N1} Go" -f ((Get-ChildItem target -Recurse -File | Measure-Object Length -Sum).Sum / 1GB) | Tee-Object -FilePath build-report.txt -Append
+
+      - name: Vérification rapide
+        shell: pwsh
+        run: ./target/release/photocraft-cli.exe info --help | Select-Object -First 5
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: photocraft-windows-x64
+          path: |
+            target/release/photocraft.exe
+            target/release/photocraft-cli.exe
+            build-report.txt
+          retention-days: 14
